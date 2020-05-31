@@ -85,14 +85,14 @@
 #define ptpip_len		0
 #define ptpip_type		4
 
-#define ptpip_cmd_dataphase	8
-#define ptpip_cmd_code		12
-#define ptpip_cmd_transid	14
-#define ptpip_cmd_param1	18
-#define ptpip_cmd_param2	22
-#define ptpip_cmd_param3	26
-#define ptpip_cmd_param4	30
-#define ptpip_cmd_param5	34
+#define ptpip_cmd_dataphase	4
+#define ptpip_cmd_code		(ptpip_cmd_dataphase + 2)
+#define ptpip_cmd_transid	(ptpip_cmd_code + 2)
+#define ptpip_cmd_param1	(ptpip_cmd_transid + 4)
+#define ptpip_cmd_param2	(ptpip_cmd_param1 + 4)
+#define ptpip_cmd_param3	(ptpip_cmd_param2 + 4)
+#define ptpip_cmd_param4	(ptpip_cmd_param3 + 4)
+#define ptpip_cmd_param5	(ptpip_cmd_param4 + 4)
 
 #define PTP_EVENT_CHECK			0x0000	/* waits for */
 #define PTP_EVENT_CHECK_FAST		0x0001	/* checks */
@@ -104,7 +104,7 @@ uint16_t
 ptp_ptpip_sendreq (PTPParams* params, PTPContainer* req, int dataphase)
 {
 	int		ret;
-	int		len = 18+req->Nparam*4;
+	int		len = ptpip_cmd_param1+req->Nparam*4;
 	unsigned char 	*request = malloc(len);
 
 	switch (req->Nparam) {
@@ -121,13 +121,13 @@ ptp_ptpip_sendreq (PTPParams* params, PTPContainer* req, int dataphase)
 
 	ptp_ptpip_check_event (params);
 
-	htod32a(&request[ptpip_type],PTPIP_CMD_REQUEST);
+	//htod32a(&request[ptpip_type],PTPIP_CMD_REQUEST);
 	htod32a(&request[ptpip_len],len);
 	/* sending data = 2, receiving data or no data = 1 */
 	if ((dataphase&PTP_DP_DATA_MASK) == PTP_DP_SENDDATA)
-		htod32a(&request[ptpip_cmd_dataphase],2);
+		htod16a(&request[ptpip_cmd_dataphase],2);
 	else
-		htod32a(&request[ptpip_cmd_dataphase],1);
+		htod16a(&request[ptpip_cmd_dataphase],1);
 	htod16a(&request[ptpip_cmd_code],req->Code);
 	htod32a(&request[ptpip_cmd_transid],req->Transaction_ID);
 
@@ -374,13 +374,13 @@ ptp_ptpip_getdata (PTPParams* params, PTPContainer* ptp, PTPDataHandler *handler
 	return PTP_RC_OK;
 }
 
-#define ptpip_resp_code		0
-#define ptpip_resp_transid	2
-#define ptpip_resp_param1	6
-#define ptpip_resp_param2	10
-#define ptpip_resp_param3	14
-#define ptpip_resp_param4	18
-#define ptpip_resp_param5	22
+//#define ptpip_resp_code		0
+#define ptpip_resp_transid	0
+#define ptpip_resp_param1	4
+#define ptpip_resp_param2	8
+#define ptpip_resp_param3	12
+#define ptpip_resp_param4	16
+#define ptpip_resp_param5	20
 
 uint16_t
 ptp_ptpip_getresp (PTPParams* params, PTPContainer* resp)
@@ -396,6 +396,7 @@ retry:
 	if (ret != PTP_RC_OK)
 		return ret;
 
+    /*
 	switch (dtoh32(hdr.type)) {
 	case PTPIP_END_DATA_PACKET:
 		GP_LOG_D("PTPIP_END_DATA_PACKET");
@@ -403,9 +404,15 @@ retry:
 		free (data);
 		data = NULL;
 		goto retry;
-	case PTPIP_CMD_RESPONSE:
+	case FUJI_PTPIP_CMD_RESPONSE:
+        */
+    if( hdr.type != 0x20010003 ) {
+		GP_LOG_E ("Unsure on type %0x", hdr.type);
+        return PTP_RC_GeneralError;
+    }
+
 		GP_LOG_D("PTPIP_CMD_RESPONSE");
-		resp->Code		= dtoh16a(&data[ptpip_resp_code]);
+		resp->Code		= hdr.type >> 16;
 		resp->Transaction_ID	= dtoh32a(&data[ptpip_resp_transid]);
 		n = (dtoh32(hdr.length) - sizeof(hdr) - ptpip_resp_param1)/sizeof(uint32_t);
 		switch (n) {
@@ -419,17 +426,20 @@ retry:
 			GP_LOG_E ("response got %d parameters?", n);
 			break;
 		}
+        /*
 		break;
 	default:
 		GP_LOG_E ("response type %d packet?", dtoh32(hdr.type));
 		break;
 	}
+    */
 	free (data);
 	return PTP_RC_OK;
 }
 
-#define ptpip_initcmd_guid	8
-#define ptpip_initcmd_name	24
+#define ptpip_fuji_connection_number 8
+#define ptpip_initcmd_guid	12
+#define ptpip_initcmd_name	28
 
 static uint16_t
 ptp_ptpip_init_command_request (PTPParams* params)
@@ -438,20 +448,24 @@ ptp_ptpip_init_command_request (PTPParams* params)
 	unsigned char*	cmdrequest;
 	unsigned int	i;
 	int 		len, ret;
-	unsigned char	guid[16];
-	
-	ptp_nikon_getptpipguid(guid);
+	unsigned char	guid[16] = {                               0xad, 0xa5, 0x48, 0x5d, 0x87, 0xb2, 0x7f, 0x0b, 
+                              0xd3, 0xd5, 0xde, 0xd0, 0x02, 0x78, 0xa8, 0xc0};
+
 #if !defined (WIN32)
 	if (gethostname (hostname, sizeof(hostname)))
 		return PTP_RC_GeneralError;
 #else
 	strcpy (hostname, "gpwindows");
 #endif
-	len = ptpip_initcmd_name + (strlen(hostname)+1)*2 + 4;
+	len = ptpip_initcmd_name + 54;
 
 	cmdrequest = malloc(len);
+	for (i=0;i<len;i++)
+        cmdrequest[i] = 0;
+
 	htod32a(&cmdrequest[ptpip_type],PTPIP_INIT_COMMAND_REQUEST);
 	htod32a(&cmdrequest[ptpip_len],len);
+	htod32a(&cmdrequest[ptpip_fuji_connection_number], 0x8f53e4f2);
 
 	memcpy(&cmdrequest[ptpip_initcmd_guid], guid, 16);
 	for (i=0;i<strlen(hostname)+1;i++) {
@@ -459,8 +473,10 @@ ptp_ptpip_init_command_request (PTPParams* params)
 		cmdrequest[ptpip_initcmd_name+i*2] = hostname[i];
 		cmdrequest[ptpip_initcmd_name+i*2+1] = 0;
 	}
+    /*
 	htod16a(&cmdrequest[ptpip_initcmd_name+(strlen(hostname)+1)*2],PTPIP_VERSION_MINOR);
 	htod16a(&cmdrequest[ptpip_initcmd_name+(strlen(hostname)+1)*2+2],PTPIP_VERSION_MAJOR);
+    */
 
 	GP_LOG_DATA ((char*)cmdrequest, len, "ptpip/init_cmd data:");
 	ret = write (params->cmdfd, cmdrequest, len);
@@ -784,7 +800,25 @@ ptp_ptpip_connect (PTPParams* params, const char *address) {
 		close (params->evtfd);
 		return translate_ptp_result (ret);
 	}
+    /*
+	ret = ptp_ptpip_fuji_open_session_request (params);
+	if (ret != PTP_RC_OK) {
+		close (params->cmdfd);
+		close (params->evtfd);
+		return translate_ptp_result (ret);
+	}
+	ret = ptp_ptpip_fuji_open_session_ack (params);
+	if (ret != PTP_RC_OK) {
+		close (params->cmdfd);
+		close (params->evtfd);
+		return translate_ptp_result (ret);
+	}
+    */
+
+    params->evtfd = params->cmdfd;
+
 	/* seen on Ricoh Theta, camera is not immediately ready. try again two times. */
+    /*
 	tries = 2;
 	saddr.sin_port		= htons(eventport);
 	do {
@@ -806,6 +840,7 @@ ptp_ptpip_connect (PTPParams* params, const char *address) {
 	ret = ptp_ptpip_init_event_ack (params);
 	if (ret != PTP_RC_OK)
 		return translate_ptp_result (ret);
+        */
 	GP_LOG_D ("ptpip connected!");
 	return GP_OK;
 #else

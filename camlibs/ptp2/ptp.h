@@ -151,6 +151,8 @@ typedef struct _PTPCanon_directtransfer_entry PTPCanon_directtransfer_entry;
 struct _PTPIPHeader {
 	uint32_t	length;
 	uint32_t	type;
+    // uint16_t response_code       // 2 or 3
+    // uint16_t cmd         // the opcode of the command that was sent
 };
 typedef struct _PTPIPHeader PTPIPHeader;
 

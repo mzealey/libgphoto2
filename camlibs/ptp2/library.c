@@ -3382,7 +3382,7 @@ enable_liveview:
 		free (ximage);
 
 		gp_file_set_mime_type (file, GP_MIME_JPEG);
-		gp_file_set_name (file, "sony_preview.jpg");
+		gp_file_set_name (file, "fuji_preview.jpg");
 		gp_file_set_mtime (file, time(NULL));
 
 		SET_CONTEXT_P(params, NULL);
@@ -8750,6 +8750,14 @@ camera_init (Camera *camera, GPContext *context)
 		/* FIXME: deviceinfo is not read yet ... (see macro)*/
 		C_PTP_REP (ret);
 	}
+
+    PTPPropertyValue        propval;
+    propval.u16 = 0;
+    ptp_setdevicepropvalue(params, 0xDF01, &propval, PTP_DTC_UINT32);
+
+    propval.u16 = 0;
+    ptp_setdevicepropvalue(params, 0xDF24, &propval, PTP_DTC_UINT32);
+
 	/* We have cameras where a response takes 15 seconds(!), so make
 	 * post init timeouts longer */
 	CR (gp_port_set_timeout (camera->port, normal_timeout));
